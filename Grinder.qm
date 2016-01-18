@@ -1,0 +1,276 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<model version="3.3.0">
+ <framework name="qpcpp"/>
+ <package name="AOs" stereotype="0x02">
+  <class name="Motor" superclass="qpcpp::QMActive">
+   <attribute name="m_timeEvt" type="QTimeEvt" visibility="0x00" properties="0x00"/>
+   <operation name="Motor" type="" visibility="0x00" properties="0x02">
+    <documentation>constructor</documentation>
+    <code>: QMActive(Q_STATE_CAST(&amp;Motor::initial)),
+  m_timeEvt(TIMEOUT_SIG)</code>
+   </operation>
+   <statechart>
+    <initial target="../1">
+     <action>me-&gt;m_timeEvt.postEvery(me, BSP_TICKS_PER_SEC/2);</action>
+     <initial_glyph conn="2,3,5,1,24,4,-2">
+      <action box="0,-2,6,2"/>
+     </initial_glyph>
+    </initial>
+    <state name="off">
+     <entry>BSP_ledOff();</entry>
+     <tran trig="TIMEOUT" target="../../2">
+      <tran_glyph conn="2,13,3,1,24,7,-2">
+       <action box="0,-2,8,2"/>
+      </tran_glyph>
+     </tran>
+     <state_glyph node="2,5,22,11">
+      <entry box="1,2,12,4"/>
+     </state_glyph>
+    </state>
+    <state name="on">
+     <entry>BSP_ledOn();</entry>
+     <tran trig="TIMEOUT, BUTTON_DOWN" target="../../1">
+      <tran_glyph conn="2,26,3,1,26,-16,-4">
+       <action box="0,-2,21,2"/>
+      </tran_glyph>
+     </tran>
+     <state_glyph node="2,18,22,10">
+      <entry box="1,2,12,4"/>
+     </state_glyph>
+    </state>
+    <state_diagram size="51,47"/>
+   </statechart>
+  </class>
+  <class name="Button" superclass="qpcpp::QMActive">
+   <documentation>Button to start the grinding process</documentation>
+   <operation name="Button" type="" visibility="0x00" properties="0x02">
+    <documentation>constructor</documentation>
+    <code>: QMActive(Q_STATE_CAST(&amp;Button::initial)),
+  m_timeEvt(TIMEOUT_SIG)</code>
+   </operation>
+   <statechart>
+    <initial target="../1">
+     <initial_glyph conn="11,4,5,0,17,3">
+      <action box="0,-2,10,2"/>
+     </initial_glyph>
+    </initial>
+    <state name="up">
+     <state_glyph node="15,7,30,7"/>
+    </state>
+    <state name="down">
+     <state_glyph node="15,22,30,8"/>
+    </state>
+    <state_diagram size="80,50"/>
+   </statechart>
+  </class>
+  <attribute name="AO_Motor" type="QActive * const" visibility="0x00" properties="0x00"/>
+ </package>
+ <package name="Events" stereotype="0x01">
+  <class name="GrinderEvent" superclass="qpcpp::QEvt"/>
+ </package>
+ <directory name=".">
+  <file name="Grinder.ino">
+   <text>#include &quot;qp_port.h&quot;
+#include &quot;Arduino.h&quot;  // always include in your sketch
+#include &quot;board.h&quot;
+
+#include &lt;SPI.h&gt;
+#include &lt;Encoder.h&gt;
+#include &lt;Adafruit_GFX.h&gt;
+#include &lt;Fonts/FreeMonoBold9pt7b.h&gt;
+#include &lt;Adafruit_SSD1306.h&gt;
+#include &quot;HX711.h&quot;
+
+Q_DEFINE_THIS_FILE
+
+ // this blathering on is in case you want to make the class a static variable in a function
+extern &quot;C&quot; {
+  __extension__ typedef int __guard __attribute__((mode (__DI__)));
+  int __cxa_guard_acquire(__guard *g) { return !*(char *)(g); };
+  void __cxa_guard_release (__guard *g) { *(char *)g = 1; };
+  void __cxa_guard_abort (__guard *) { };
+} // end extern &quot;C&quot;
+
+using namespace QP;
+
+// ===== definitions =====
+
+#define BSP_TICKS_PER_SEC 100
+
+// button
+#define BUTTON_LED_PIN 5
+#define BUTTON_SWITCH_PIN 7
+
+// scale
+#define SCALE_DOUT  4
+#define SCALE_CLK   6
+#define SCALE_CALIBRATION_FACTOR -444190.0 //This value is obtained using the SparkFun_HX711_Calibration sketch
+HX711 scale(SCALE_DOUT, SCALE_CLK);
+
+// OLED
+//#define OLED_MOSI   9
+//#define OLED_CLK   10
+//#define OLED_DC    14
+//#define OLED_CS    15
+//#define OLED_RESET 16
+//Adafruit_SSD1306 display(OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS);
+
+// Uncomment this block to use hardware SPI
+
+//#define SPI_MOSI 16
+//#define SPI_MISO 14
+//#define SPI_CLK  15
+
+#define OLED_DC     8
+#define OLED_CS    10
+#define OLED_RESET  9
+Adafruit_SSD1306 display(OLED_DC, OLED_RESET, OLED_CS);
+
+
+#define LOGO16_GLCD_HEIGHT 16 
+#define LOGO16_GLCD_WIDTH  16 
+static const unsigned char PROGMEM logo16_glcd_bmp[] =
+{ B00000000, B11000000,
+  B00000001, B11000000,
+  B00000001, B11000000,
+  B00000011, B11100000,
+  B11110011, B11100000,
+  B11111110, B11111000,
+  B01111110, B11111111,
+  B00110011, B10011111,
+  B00011111, B11111100,
+  B00001101, B01110000,
+  B00011011, B10100000,
+  B00111111, B11100000,
+  B00111111, B11110000,
+  B01111100, B11110000,
+  B01110000, B01110000,
+  B00000000, B00110000 };
+
+#if (SSD1306_LCDHEIGHT != 64)
+#error(&quot;Height incorrect, please fix Adafruit_SSD1306.h!&quot;);
+#endif
+
+// encoder
+//Encoder myEnc(2, 4);
+
+
+
+enum GrinderSignals { // signals for the Grinder application
+    TIMEOUT_SIG = Q_USER_SIG,
+    BUTTON_DOWN_SIG
+};
+
+//............................................................................
+void BSP_init(void) {
+
+    Serial1.begin(115200U); // set the highest stanard baud rate of 115200 bps
+    Serial1.println(&quot;Starting.&quot;);
+
+    pinMode(BUTTON_LED_PIN, OUTPUT);    // button LED
+    pinMode(BUTTON_SWITCH_PIN, INPUT);     // button direction
+    digitalWrite(BUTTON_SWITCH_PIN, HIGH); // button: turn on pullup resistors
+
+    // configure external interrupt 6 (Pin7)
+    EICRB |= (0&lt;&lt;ISC60)|(1&lt;&lt;ISC61); // external int ctrl, falling edge detection for interrupt 6
+    EIMSK |= (1&lt;&lt;INT6);             // external int mask, activates the interrupt
+
+    scale.set_scale(SCALE_CALIBRATION_FACTOR); //This value is obtained by using the SparkFun_HX711_Calibration sketch
+    scale.tare();  //Assuming there is no weight on the scale at start up, reset the scale to 0
+
+    // by default, we'll generate the high voltage from the 3.3v line internally! (neat!)
+    display.begin(SSD1306_SWITCHCAPVCC);
+
+    display.clearDisplay();
+
+    // text display
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+
+    display.setCursor(0,0);
+    display.println(&quot;Ennel power!&quot;);
+
+    display.setFont(&amp;FreeMonoBold9pt7b);
+    display.display();
+
+}
+//............................................................................
+void BSP_ledOff(void) {
+    digitalWrite(BUTTON_LED_PIN, LOW);    // turn the LED off by making the voltage LOW
+}
+//............................................................................
+void BSP_ledOn(void) {
+    digitalWrite(BUTTON_LED_PIN, HIGH);   // turn the LED on (HIGH is the voltage level)
+}
+//............................................................................
+ISR(TIMER0_COMPA_vect) {
+    QF::TICK((void *)0); // process all armed time events
+}
+
+
+//............................................................................
+void QF::onStartup(void) {
+    // configure 8bit Timer0
+    TCCR0A = (1 &lt;&lt; WGM01) | (0 &lt;&lt; WGM00); // timer/counter control, CTC mode, no PWM
+    TCCR0B = (1 &lt;&lt; CS02 ) | (0 &lt;&lt; CS01) | (1 &lt;&lt; CS00); // timer/counter control, 1/1024 prescaler, internal clock source
+    //ASSR  &amp;= ~(1 &lt;&lt; AS2);
+    TIMSK0 = (1 &lt;&lt; OCIE0A);         // timer interrupt mask, enable TIMER2 compare Interrupt
+    TCNT0  = 0;                     // timer/counter 0, initialize couter to 0
+    OCR0A  = (F_CPU / BSP_TICKS_PER_SEC / 1024) - 1; // output compare register, init with value to compare to
+}
+//............................................................................
+void QF::onCleanup(void) {
+}
+//............................................................................
+void QF::onIdle() {
+    QF_INT_ENABLE(); // re-enable interrupts
+}
+//............................................................................
+void Q_onAssert(char const Q_ROM * const file, int line) {
+    QF_INT_DISABLE(); // disable all interrupts
+    Serial1.println(&quot;Assert hit!&quot;);
+    BSP_ledOff(); // User LED permanently ON
+    asm volatile (&quot;jmp 0x0000&quot;); // perform a software reset of the Arduino
+}
+
+//============================================================================
+// generate code for the Blinky application...
+$declare(Events::GrinderEvent)
+
+$declare(AOs::Motor)
+$define(AOs::Motor)
+
+//............................................................................
+static Motor l_motor;                           // instantiate the Motor AO
+QActive *AO_Motor = &amp;l_motor;     // initialize the global pointer to motor
+
+//............................................................................
+void setup() {
+    BSP_init(); // initialize the BSP
+
+    QF::init(); // initialize the framework and the underlying RT kernel
+
+    static QEvt const *motor_queueSto[10]; // alocate event queue buffer
+
+    static QF_MPOOL_EL(GrinderEvent) l_smlPoolSto[4]; //storage for small epool
+
+    QF::poolInit(l_smlPoolSto, sizeof(l_smlPoolSto), sizeof(l_smlPoolSto[0])); // initialize event pools...
+
+    AO_Motor-&gt;start(1, motor_queueSto, Q_DIM(motor_queueSto),
+                     (void *)0, 0U);        // start the motor active object
+}
+
+ISR(INT6_vect) {
+    Serial1.println(&quot;ISR hit.&quot;);
+    // new event
+    GrinderEvent *pEvt = Q_NEW(GrinderEvent, BUTTON_DOWN_SIG);
+    AO_Motor-&gt;POST(pEvt, 2); // invoke the POST macro doing post_()
+}
+
+
+// Do not define the loop() function, because this function is already defined in the QP port to Arduino
+
+</text>
+  </file>
+ </directory>
+</model>
