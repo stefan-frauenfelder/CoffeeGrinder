@@ -21,7 +21,7 @@ BOOTLOADER_FILE   = Caterina-promicro16.hex
 
 USB_PID			  = 0x9204
 
-ARDUINO_LIBS      = Adafruit-GFX-Library Adafruit_SSD1306 Encoder Firmata HX711 SPI Wire qp_avr
+ARDUINO_LIBS      = Adafruit-GFX-Library Adafruit_SSD1306 SimpleEncoder Firmata HX711 SPI Wire qp_avr
 
 
 ISP_PROG     	  = usbasp
